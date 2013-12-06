@@ -1,0 +1,26 @@
+{
+  "builders": [{
+    "type": "amazon-ebs",
+    "region": "us-west-1",
+    "source_ami": "ami-b6ac9df3",
+    "instance_type": "t1.micro",
+    "ssh_username": "ubuntu",
+    "ami_name": "Autoroute - {{timestamp}}"
+  }],
+  "provisioners": [{
+    "type": "shell",
+    "inline": [
+      "sudo mkdir -p /var/autoroute/",
+      "sudo chown ubuntu /var/autoroute/"
+    ]
+  },
+  {
+    "type": "file",
+    "source": "./",
+    "destination": "/var/autoroute"   
+  },
+  {
+    "type": "shell",
+    "script": "packer/setup.sh"
+  }]
+}

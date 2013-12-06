@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 import argparse
 import json
 import logging
@@ -26,6 +28,10 @@ LOG_DATE = '%Y-%m-%d %I:%M:%S %p'
 logger = logging.getLogger('autoscale-dns')
 
 
+class AutorouteError(Exception):
+    pass
+
+
 # check if the record is there
 # if it isn't add the record
 def add_record(id):
@@ -36,10 +42,13 @@ def add_record(id):
             and len(instance.public_dns_name) > 0:
         dns_name = instance.public_dns_name
 
-        # get the tag data from the instance
-        d = json.loads(instance.tags['dns'])
+        try:
+            # get the tag data from the instance
+            d = json.loads(instance.tags['dns'])
 
-        name = "%s.%s" % (d['record'], d['zone'])
+            name = "%s.%s" % (d['record'], d['zone'])
+        except:
+            raise AutorouteError("unable to get dns information")
 
         zone = r53.get_zone(d['zone'])
         records = zone.find_records(name, 'CNAME', all=True)
@@ -89,9 +98,12 @@ def add_record(id):
 def remove_record(id):
     instance = ec2.get_only_instances([id])[0]
 
-    d = json.loads(instance.tags['dns'])
+    try:
+        d = json.loads(instance.tags['dns'])
 
-    name = "%s.%s" % (d['record'], d['zone'])
+        name = "%s.%s" % (d['record'], d['zone'])
+    except:
+        raise AutorouteError("unable to get dns information")
 
     zone = r53.get_zone(d['zone'])
     records = zone.find_records(name, 'CNAME', all=True)
@@ -109,7 +121,7 @@ def remove_record(id):
         zone.delete_record(records)
 
 
-# todo: finish implementing this
+# todo: finish implementing this and have it run periodically
 def sync_group():
     id = "i-f4bd6ea9"
     i = ec2.get_only_instances([id])[0]
@@ -130,7 +142,7 @@ parser = argparse.ArgumentParser(description='do the dns')
 parser.add_argument('--key', default=None)
 parser.add_argument('--secret', default=None)
 parser.add_argument('--region', default="us-west-1")
-parser.add_argument('-q', '--queue', default="autoscale-dns")
+parser.add_argument('-q', '--queue', default="autoroute")
 parser.add_argument('-l', '--level', default='info')
 
 args = parser.parse_args()
@@ -142,6 +154,8 @@ logging.basicConfig(format=LOG_FORMAT,
 # check for argument, env
 key = args.key or os.environ.get('AWS_ACCESS_KEY_ID')
 secret = args.secret or os.environ.get('AWS_SECRET_ACCESS_KEY')
+
+logger.debug('attempting to connect to aws resources')
 
 if key is not None:
     sqs = boto.sqs.connect_to_region(
@@ -159,10 +173,17 @@ else:
     r53 = Route53Connection()
 
 
+logger.debug('connceted to aws resources')
+
 logger.info('hello')
 
 # connect to SQS Queue
 queue = sqs.get_queue(args.queue)
+
+if queue is None:
+    logger.error("unable to attach to queue '%s'" % (args.queue))
+    sys.exit(1)
+
 queue.set_message_class(RawMessage)
 
 
@@ -184,7 +205,6 @@ while True:
         # in this case the data should be a json object, with an embedded
         # json message
         try:
-
             data = json.loads(message.get_body())
             details = json.loads(data['Message'])
 
@@ -212,7 +232,11 @@ while True:
                 # whoops, whats this message here for
                 delete = True
 
+        except AutorouteError:
+            # these failures shouldn't be retried later
+            delete = True
         except Exception as e:
+            # for now leave on queue and retry when they are visible
             logger.warn('error reading message: %s' % (str(e)))
             # delete = True
 

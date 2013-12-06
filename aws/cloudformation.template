@@ -1,0 +1,86 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+
+  "Description": "etcd Cluster on EC2",
+
+  "Parameters": {
+    "InstanceType": {
+      "Description": "WebServer EC2 instance type",
+      "Type": "String",
+      "Default": "t1.micro",
+      "AllowedValues": [ "t1.micro","m1.small","m1.medium","m1.large","m1.xlarge","m2.xlarge","m2.2xlarge","m2.4xlarge","m3.xlarge","m3.2xlarge","c1.medium","c1.xlarge","cc1.4xlarge","cc2.8xlarge","cg1.4xlarge"],
+      "ConstraintDescription": "must be a valid EC2 instance type."
+    },
+
+    "Groups": {
+      "Description": "SecurityGroups",
+      "Type": "CommaDelimitedList",
+      "Default": "${groups}"
+    },
+
+    "KeyPair": {
+      "Description": "The EC2 Key Pair to allow SSH access to the instance.",
+      "Type": "String",
+      "Default": "${keypair}"
+    },
+
+    "InstanceRole": {
+      "Description": "Role to assign to the instance",
+      "Type": "String",
+      "Default": "${role}"
+    },
+
+    "Options": {
+      "Description": "Options to pass into the Userdata",
+      "Type": "String",
+      "Default": "${options}"
+    }
+  },
+
+  "Mappings": {
+    "RegionMap": {
+      "us-east-1": {
+        "AMI": "${ami_us_east_1}"
+      },
+      "us-west-1": {
+        "AMI": "${ami_us_west_1}"
+      }
+    }
+  },
+
+  "Resources": {
+    "EtcdServerGroup": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "Properties": {
+        "AvailabilityZones": { "Fn::GetAZs": "" },
+        "LaunchConfigurationName": { "Ref": "LaunchConfig" },
+        "MinSize": "1",
+        "MaxSize": "2",
+        "Tags": [
+          {"Key": "Name", "Value": "autoroute", "PropagateAtLaunch": true}
+        ]
+      }
+    },
+
+    "LaunchConfig": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",
+      "Properties": {
+        "ImageId": { "Fn::FindInMap": [ "RegionMap", { "Ref": "AWS::Region" }, "AMI" ]},
+        "KeyName": {"Ref": "KeyPair"},
+        "SecurityGroups": { "Ref": "Groups" },
+        "InstanceType": { "Ref": "InstanceType" },
+
+        "UserData" : { "Fn::Base64" : { "Fn::Join" : ["",[
+          "#cloud-config\n",
+          "write_files:\n",
+          "  - content: |\n",
+          "      OPTS='", { "Ref": "Options" },"'\n",
+          "    path: /etc/default/autoroute\n"
+        ]]}},
+
+
+        "IamInstanceProfile": { "Ref": "InstanceRole" }
+      }
+    }
+  }
+}
